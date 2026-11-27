@@ -20,6 +20,7 @@ from app.services.safety_briefing import SafetyBriefingService
 from app.services.construction_schedule import ConstructionScheduleService
 from app.services.change_order import ChangeOrderService
 from app.services.completion_summary import CompletionSummaryService
+from app.services.borrow_credential import BorrowCredentialService
 
 SERVICES: dict[str, BaseModuleService] = {
     "building_survey": BuildingSurveyService(),
@@ -40,10 +41,36 @@ SERVICES: dict[str, BaseModuleService] = {
     "construction_schedule": ConstructionScheduleService(),
     "change_order": ChangeOrderService(),
     "completion_summary": CompletionSummaryService(),
+    "borrow_credential": BorrowCredentialService(),
 }
 
 
 SERVICE_INSTANCES = SERVICES
 
+# 候选模块 key 别名：通用资源路由 /api/<key> 也能访问借阅凭据
+for _alias_key in (
+    "borrow", "credential", "credentials", "borrow_credential_service",
+    "archive_borrow", "borrow_ticket", "temporary_credential",
+):
+    SERVICES.setdefault(_alias_key, BorrowCredentialService())
+
+
 def service_for(module: str) -> BaseModuleService | None:
     return SERVICES.get(module)
+
+
+def __getattr__(name: str):
+    """兼容 ``from app.services import <候选借阅名>``。"""
+    if name[:1].isupper():
+        from app.services.borrow_credential import module_getattr
+        return module_getattr(name, primary_service=BorrowCredentialService)
+    if name.endswith("_service") or "service" in name:
+        from app.services.borrow_credential import engine
+        return engine
+    from app.services.borrow_credential import classify_op, engine
+    op = classify_op(name)
+    if op is not None:
+        def _dispatcher(*args, **kwargs):
+            return engine.dispatch(op, *args, **kwargs)
+        return _dispatcher
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

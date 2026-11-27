@@ -22,10 +22,24 @@ class Store:
         self._idempotent_log: dict[tuple, float] = {}
         # 跨模块锁：{resource_key: thread_id}  用于并发场景 tolerance
         self._resource_locks: dict[str, int] = {}
+        # 领域内部表（如借阅凭据的候选镜像表）：仍可 store.rows(name) 直查，
+        # 但不计入 module_names/overview 的业务模块清单。
+        self.internal_tables: set[str] = set()
 
     # ── 基础访问 ──
     def module_names(self) -> list[str]:
-        return sorted(self._tables)
+        return sorted(name for name in self._tables if name not in self.internal_tables)
+
+    def __getattr__(self, name: str) -> Any:
+        """兼容 ``store.borrow_records`` 这类属性式取表；未知名惰性建表。"""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        tables = self.__dict__.get("_tables")
+        if tables is None:
+            raise AttributeError(name)
+        if name in tables:
+            return tables[name]
+        return self.rows(name)
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])

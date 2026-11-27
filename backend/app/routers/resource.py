@@ -93,9 +93,29 @@ def create_entry(module: str, payload: EntryPayload) -> ActionResult:
 
 
 @router.post("/{module}/{entry_id}/actions", response_model=ActionResult)
-def run_action(module: str, entry_id: int, payload: ActionPayload) -> ActionResult:
+def run_action(module: str, entry_id: int, payload: ActionPayload, request: Request) -> ActionResult:
     service = require_service(module)
-    entry, message = service.run_action(entry_id, payload.action.strip())
+    context = payload.model_dump()
+    # 允许通过标准请求头传递引用请求号（断线重试的幂等键）
+    for header in ("idempotency-key", "x-idempotency-key", "x-request-id",
+                   "x-client-token", "request-id"):
+        value = request.headers.get(header)
+        if value and not context.get("request_id"):
+            context["request_id"] = value
+            break
+    result = service.run_action(entry_id, payload.action.strip(), context=context)
+    # 借阅凭据等富结果：ActionOutcome 本身是 (entry, message) 二元组
+    if result.__class__.__name__ == "ActionOutcome":
+        rich = result.to_dict()  # type: ignore[attr-defined]
+        try:
+            return ActionResult(**rich)
+        except Exception:
+            return ActionResult(
+                ok=bool(getattr(result, "ok", result[0] is not None)),
+                message=result[1],
+                entry=rich,
+            )
+    entry, message = result
     return ActionResult(ok=entry is not None, message=message, entry=entry)
 
 

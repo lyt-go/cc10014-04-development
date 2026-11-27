@@ -71,13 +71,23 @@ class BaseModuleService:
         rows = store.rows(self.MODULE)
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
         entry.update({field: values.get(field) for field in self.LIST_FIELDS})
+        # 保留 LIST_FIELDS 之外的扩展字段（如“附件编号”等新业务字段）
+        for key, value in values.items():
+            if key not in entry and value is not None:
+                entry[key] = value
         entry["status"] = self.STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False
         rows.append(entry)
         return entry, []
 
-    def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
+    def run_action(
+        self,
+        entry_id: int,
+        action: str,
+        context: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> tuple[dict[str, Any] | None, str]:
         """执行动作：幂等检查 -> 前置校验 -> 状态变更 -> 跨模块联动。"""
         # 幂等检查
         if store.check_idempotent(self.MODULE, entry_id, action):
